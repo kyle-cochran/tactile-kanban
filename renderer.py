@@ -123,3 +123,125 @@ def render_card(
         )
 
     return img.convert("RGB")
+
+
+def render_waiting_prompt(
+    width: int,
+    height: int,
+    tag_label: str,
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+) -> Image.Image:
+    """Render a neutral 'waiting to be registered' screen."""
+    img = Image.new("P", (width, height))
+    img.putpalette(_PALETTE_RGB)
+    draw = ImageDraw.Draw(img)
+
+    size_large  = max(12, height // 7)
+    size_medium = max(10, height // 9)
+
+    font_large  = _load_font(font_bold_path, size_large)
+    font_medium = _load_font(font_path, size_medium)
+
+    draw.rectangle([0, 0, width - 1, height - 1], fill=0)  # white background
+
+    # Black header with tag label
+    header_h = size_large + 8
+    draw.rectangle([0, 0, width - 1, header_h - 1], fill=1)
+    bbox = draw.textbbox((0, 0), tag_label, font=font_large)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((width - tw) // 2, (header_h - th) // 2), tag_label, fill=0, font=font_large)
+
+    # Centred "WAITING TO REGISTER" text
+    for i, text in enumerate(["WAITING TO", "REGISTER"]):
+        font = font_large if i == 1 else font_medium
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        y = header_h + (height - header_h) // 2 + (i - 1) * (th + 6)
+        draw.text(((width - tw) // 2, y), text, fill=1, font=font)
+
+    return img.convert("RGB")
+
+
+def render_registered_confirmation(
+    width: int,
+    height: int,
+    tag_label: str,
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+) -> Image.Image:
+    """Render a 'Registered' confirmation screen."""
+    img = Image.new("P", (width, height))
+    img.putpalette(_PALETTE_RGB)
+    draw = ImageDraw.Draw(img)
+
+    size_large  = max(12, height // 7)
+    size_medium = max(10, height // 9)
+
+    font_large  = _load_font(font_bold_path, size_large)
+    font_medium = _load_font(font_path, size_medium)
+
+    draw.rectangle([0, 0, width - 1, height - 1], fill=0)  # white background
+
+    # Black header with tag label
+    header_h = size_large + 8
+    draw.rectangle([0, 0, width - 1, header_h - 1], fill=1)
+    bbox = draw.textbbox((0, 0), tag_label, font=font_large)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((width - tw) // 2, (header_h - th) // 2), tag_label, fill=0, font=font_large)
+
+    # "REGISTERED" centred in the body
+    text = "REGISTERED"
+    bbox = draw.textbbox((0, 0), text, font=font_large)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((width - tw) // 2, header_h + (height - header_h - th) // 2), text, fill=1, font=font_large)
+
+    return img.convert("RGB")
+
+
+def render_registration_prompt(
+    width: int,
+    height: int,
+    tag_label: str,
+    column: str = "READY",
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+) -> Image.Image:
+    """Render a 'tap me to register' screen on an e-paper tag."""
+    img = Image.new("P", (width, height))
+    img.putpalette(_PALETTE_RGB)
+    draw = ImageDraw.Draw(img)
+
+    size_large  = max(12, height // 7)
+    size_medium = max(10, height // 9)
+
+    font_large  = _load_font(font_bold_path, size_large)
+    font_medium = _load_font(font_path, size_medium)
+
+    draw.rectangle([0, 0, width - 1, height - 1], fill=0)  # white background
+
+    # Yellow header showing the tag's alias/label
+    header_h = size_large + 8
+    draw.rectangle([0, 0, width - 1, header_h - 1], fill=3)
+    bbox = draw.textbbox((0, 0), tag_label, font=font_large)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((width - tw) // 2, (header_h - th) // 2), tag_label, fill=1, font=font_large)
+
+    # Centred instruction block
+    lines = [("TAP ME ON", font_medium, 1), (column, font_large, 2), ("TO REGISTER", font_medium, 1)]
+    line_heights = []
+    for text, font, _ in lines:
+        b = draw.textbbox((0, 0), text, font=font)
+        line_heights.append(b[3] - b[1] + 6)
+
+    total_h = sum(line_heights)
+    y = header_h + (height - header_h - total_h) // 2
+
+    for (text, font, fill), lh in zip(lines, line_heights):
+        b = draw.textbbox((0, 0), text, font=font)
+        tw = b[2] - b[0]
+        draw.text(((width - tw) // 2, y), text, fill=fill, font=font)
+        y += lh
+
+    return img.convert("RGB")

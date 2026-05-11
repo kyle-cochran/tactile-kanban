@@ -180,6 +180,12 @@ class Store:
             ).fetchall()
             return [_row_to_tag(r) for r in rows]
 
+    def clear_all_nfc_uids(self) -> int:
+        """Set nfc_uid to NULL for every tag. Returns the number of rows cleared."""
+        with self._conn() as conn:
+            cur = conn.execute("UPDATE tags SET nfc_uid = NULL")
+            return cur.rowcount
+
     def get_tags_without_nfc(self) -> list[TagRecord]:
         with self._conn() as conn:
             rows = conn.execute(

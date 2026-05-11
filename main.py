@@ -12,7 +12,8 @@ from config import get_config
 from github_client import GitHubClient, ProjectMeta, SprintItem
 from nfc import NfcReader
 from oepl import OEPLClient
-from renderer import render_card
+from pn532 import PN532
+from renderer import render_card, render_registered_confirmation, render_registration_prompt, render_waiting_prompt
 from store import Assignment, Store, TagRecord
 
 
@@ -27,6 +28,7 @@ def do_sync(
     gh: GitHubClient,
     meta: ProjectMeta,
     cfg,
+    force: bool = False,
 ) -> list[SprintItem]:
     """Sync tag displays with current sprint state. Returns unassigned items."""
     print(f"[sync] Fetching sprint: {meta.current_sprint_title}")
@@ -50,16 +52,23 @@ def do_sync(
     item_map = {i.item_id: i for i in items}
 
     # Update displays for all assigned tags
-    for tag, assignment in store.get_all_assignments():
+    assignments = store.get_all_assignments()
+    print(f"[sync] {len(assignments)} tag assignment(s) in database")
+
+    if not assignments:
+        print("[sync] No assignments found — run 'assign' to map tickets to tags")
+
+    for tag, assignment in assignments:
+        label = tag.alias or tag.mac[:12]
         item = item_map.get(assignment.github_item_id)
         if item is None:
-            print(f"  [sync] tag {tag.mac[:8]}… — assigned item no longer in sprint, skipping")
+            print(f"  [sync] {label} — item {assignment.github_item_id} not in current sprint, skipping")
             continue
 
         status_changed = item.status != assignment.status
         assignee_changed = (item.assignees[0] if item.assignees else "") != assignment.assignee
 
-        if status_changed or assignee_changed:
+        if force or status_changed or assignee_changed:
             assignee = item.assignees[0] if item.assignees else ""
             store.set_assignment(
                 mac=tag.mac,
@@ -72,15 +81,36 @@ def do_sync(
                 sprint_id=item.sprint_id,
             )
             _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg)
-            print(f"  [sync] #{item.issue_number} → {item.status}")
+            print(f"  [sync] pushed #{item.issue_number} ({item.status}) → {label}")
+        else:
+            print(f"  [sync] #{item.issue_number} ({item.status}) — no change, skipping")
 
-    # Identify sprint items not yet assigned to any tag
+    # Auto-assign any unassigned sprint items to vacant tags
     assigned_item_ids = {a.github_item_id for _, a in store.get_all_assignments()}
-    unassigned = [i for i in items if i.item_id not in assigned_item_ids]
-    if unassigned:
-        print(f"[sync] {len(unassigned)} sprint items not yet assigned to a tag")
+    unassigned_items = [i for i in items if i.item_id not in assigned_item_ids]
+    vacant_tags = store.get_unassigned_tags()
 
-    return unassigned
+    for item, tag in zip(unassigned_items, vacant_tags):
+        assignee = item.assignees[0] if item.assignees else ""
+        store.set_assignment(
+            mac=tag.mac,
+            item_id=item.item_id,
+            issue_number=item.issue_number,
+            issue_title=item.title,
+            status=item.status,
+            status_option_id=item.status_option_id,
+            assignee=assignee,
+            sprint_id=item.sprint_id,
+        )
+        _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg)
+        label = tag.alias or tag.mac[:12]
+        print(f"  [sync] auto-assigned #{item.issue_number} → {label}")
+
+    leftover = len(unassigned_items) - len(vacant_tags)
+    if leftover > 0:
+        print(f"[sync] {leftover} sprint item(s) have no tag to assign to")
+
+    return unassigned_items
 
 
 # ---------------------------------------------------------------------------
@@ -143,42 +173,130 @@ def do_assign(store: Store, oepl: OEPLClient, gh: GitHubClient, cfg):
 # NFC registration
 # ---------------------------------------------------------------------------
 
+_REGISTRATION_COLUMN       = "READY"
+_REGISTRATION_READER_ADDR  = 0x24     # PN532 I2C address on the Ready column
+_REGISTRATION_I2C_BUS      = 1
 
-def do_register_nfc(store: Store, nfc_device: str):
+
+def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
+    """Register NFC sticker UIDs for all e-ink tags that don't have one yet.
+
+    1. Sets all tags to 15-second refresh so the prompt appears quickly.
+    2. For each unregistered tag: pushes a 'tap me on READY' prompt to its
+       display, then waits for a tap on the PN532 reader at 0x24.
+    3. Saves NFC UID → e-ink MAC to the database.
+    """
+    # Refresh tag list from AP so the store is up to date
+    for t in oepl.get_tags():
+        mac = t.get("mac", "")
+        if not mac:
+            continue
+        hw_type = t.get("hwType", 0)
+        w, h = oepl.get_tag_dimensions(hw_type)
+        store.upsert_tag(mac, w, h, t.get("alias", ""))
+
+    if force:
+        n = store.clear_all_nfc_uids()
+        print(f"[register] Cleared {n} existing NFC UID(s) — re-registering all.")
+
     tags_without_nfc = store.get_tags_without_nfc()
     if not tags_without_nfc:
-        print("[nfc-register] All tags have NFC UIDs registered.")
+        print("[register] All tags already have NFC UIDs — nothing to do.")
         return
 
-    reader = NfcReader(nfc_device)
-    reader.start()
-    print("[nfc-register] NFC reader started. Tap a sticker when prompted.\n")
+    print(f"[register] Setting all tags to 40 s refresh …")
+    oepl.set_fast_refresh_all(interval_s=40)
+
+    print(f"[register] {len(tags_without_nfc)} tag(s) to register.")
+    print(f"[register] Reader: I2C bus {_REGISTRATION_I2C_BUS}, "
+          f"address 0x{_REGISTRATION_READER_ADDR:02X}  →  column '{_REGISTRATION_COLUMN}'\n")
+
+    # Push a neutral waiting screen to every unregistered tag up front so the
+    # active 'tap me' prompt is unambiguous when it appears.
+    print("[register] Pushing waiting screen to all unregistered tags …")
+    for tag in tags_without_nfc:
+        if tag.width and tag.height:
+            img = render_waiting_prompt(
+                tag.width, tag.height,
+                tag_label=tag.alias or tag.mac[-5:],
+                font_path=cfg.font_path,
+                font_bold_path=cfg.font_bold_path,
+            )
+            oepl.push_image(tag.mac, img)
+    print("[register] Waiting screens queued. Starting registration loop.\n")
 
     try:
-        for tag in tags_without_nfc:
+        reader = PN532(bus=_REGISTRATION_I2C_BUS, address=_REGISTRATION_READER_ADDR)
+        reader.open()
+    except Exception as e:
+        print(f"[register] Cannot open PN532: {e}")
+        return
+
+    try:
+        for i, tag in enumerate(tags_without_nfc, 1):
             label = tag.alias or tag.mac
             assignment = store.get_assignment(tag.mac)
-            ticket = f"#{assignment.issue_number} {assignment.issue_title}" if assignment else "(unassigned)"
-            print(f"Tag: {label}  |  Ticket: {ticket}")
-            print("  Tap the NFC sticker on this tag (or press Enter to skip)...")
+            ticket = (f"#{assignment.issue_number} {assignment.issue_title}"
+                      if assignment else "(unassigned)")
 
+            print(f"[{i}/{len(tags_without_nfc)}] {label}  |  {ticket}")
+
+            # Push the registration prompt to this tag's display
+            if tag.width and tag.height:
+                img = render_registration_prompt(
+                    tag.width, tag.height,
+                    tag_label=tag.alias or tag.mac[-5:],
+                    column=_REGISTRATION_COLUMN,
+                    font_path=cfg.font_path,
+                    font_bold_path=cfg.font_bold_path,
+                )
+                oepl.push_image(tag.mac, img)
+                print(f"  Prompt pushed to display — waiting for tag check-in …")
+            else:
+                print(f"  (unknown dimensions — skipping display push)")
+
+            print(f"  Tap the NFC sticker on this tag to the {_REGISTRATION_COLUMN} reader, "
+                  f"or press Enter to skip.")
+
+            import select as _select
             uid: Optional[str] = None
+            last_seen: Optional[str] = None
             while uid is None:
-                # Also check for keyboard skip
-                import select as _select
                 r, _, _ = _select.select([sys.stdin], [], [], 0.05)
                 if r:
                     sys.stdin.readline()
                     break
-                uid = reader.poll(timeout=0.05)
+                raw_uid = reader.read_passive_target(timeout=0.5)
+                if raw_uid is None:
+                    last_seen = None  # tag left the field — reset debounce
+                    continue
+                candidate = raw_uid.hex().upper()
+                if candidate == last_seen:
+                    continue  # same tap still in the field, ignore
+                last_seen = candidate
+                existing = store.get_tag_by_nfc(candidate)
+                if existing is not None:
+                    print(f"  UID {candidate} is already linked to "
+                          f"{existing.alias or existing.mac} — try a different sticker.")
+                    continue
+                uid = candidate
 
             if uid:
                 store.set_nfc_uid(tag.mac, uid)
-                print(f"  Registered NFC UID {uid} → {label}\n")
+                print(f"  ✓ Linked  NFC {uid}  →  {label}")
+                if tag.width and tag.height:
+                    img = render_registered_confirmation(
+                        tag.width, tag.height,
+                        tag_label=tag.alias or tag.mac[-5:],
+                        font_path=cfg.font_path,
+                        font_bold_path=cfg.font_bold_path,
+                    )
+                    oepl.push_image(tag.mac, img)
+                print()
             else:
-                print("  Skipped.\n")
+                print(f"  Skipped.\n")
     finally:
-        reader.stop()
+        reader.close()
 
 
 # ---------------------------------------------------------------------------
@@ -187,80 +305,69 @@ def do_register_nfc(store: Store, nfc_device: str):
 
 
 def run_service(store: Store, oepl: OEPLClient, gh: GitHubClient, cfg):
-    nfc_reader = NfcReader(cfg.nfc_device)
+    nfc_reader = NfcReader(cfg.column_map, i2c_bus=cfg.nfc_i2c_bus)
     nfc_reader.start()
 
     meta = gh.get_project_meta()
-    do_sync(store, oepl, gh, meta, cfg)
+    do_sync(store, oepl, gh, meta, cfg, force=True)
     last_sync = time.monotonic()
 
     print(f"[run] Service started. Syncing every {cfg.sync_interval}s. Tap NFC stickers to update status.")
 
-    while True:
-        # Handle NFC taps
-        uid = nfc_reader.poll(timeout=0.5)
-        if uid:
-            _handle_nfc_tap(uid, store, oepl, gh, meta, cfg)
+    try:
+        while True:
+            result = nfc_reader.poll()
+            if result:
+                uid, target_status = result
+                if _handle_nfc_tap(uid, target_status, store, oepl, gh, meta, cfg):
+                    meta = gh.get_project_meta()
+                    do_sync(store, oepl, gh, meta, cfg)
+                    last_sync = time.monotonic()
 
-        # Periodic sync
-        if time.monotonic() - last_sync >= cfg.sync_interval:
-            meta = gh.get_project_meta()
-            do_sync(store, oepl, gh, meta, cfg)
-            last_sync = time.monotonic()
+            if time.monotonic() - last_sync >= cfg.sync_interval:
+                meta = gh.get_project_meta()
+                do_sync(store, oepl, gh, meta, cfg)
+                last_sync = time.monotonic()
+    finally:
+        nfc_reader.stop()
 
 
-def _handle_nfc_tap(uid: str, store: Store, oepl: OEPLClient, gh: GitHubClient, meta: ProjectMeta, cfg):
+def _handle_nfc_tap(uid: str, target_status: str, store: Store, oepl: OEPLClient,
+                    gh: GitHubClient, meta: ProjectMeta, cfg) -> bool:
+    """Apply a column tap. Returns True if GitHub was updated (triggers a sync)."""
     tag = store.get_tag_by_nfc(uid)
     if tag is None:
-        print(f"[nfc] Unknown sticker UID {uid} — run 'register-nfc' to register it")
-        return
+        print(f"[nfc] Unknown UID {uid} — run 'register-nfc' to register it")
+        return False
 
     assignment = store.get_assignment(tag.mac)
     if assignment is None:
         print(f"[nfc] Tag {tag.alias or tag.mac} has no ticket assigned")
-        return
+        return False
 
-    next_status = _next_status(assignment.status, meta.status_options)
-    if next_status is None:
-        print(f"[nfc] #{assignment.issue_number} is already at final status ({assignment.status})")
-        return
+    option = next(
+        (o for o in meta.status_options if o.name.lower() == target_status.lower()),
+        None,
+    )
+    if option is None:
+        print(f"[nfc] '{target_status}' not found in project — "
+              f"available: {[o.name for o in meta.status_options]}")
+        return False
 
-    print(f"[nfc] #{assignment.issue_number} {assignment.status!r} → {next_status.name!r}")
+    print(f"[nfc] #{assignment.issue_number} '{assignment.status}' → '{option.name}'")
 
-    ok = gh.update_item_status(
+    if not gh.update_item_status(
         meta.project_id,
         assignment.github_item_id,
         meta.status_field_id,
-        next_status.id,
-    )
-    if not ok:
-        return
+        option.id,
+    ):
+        return False
 
-    store.update_assignment_status(tag.mac, next_status.name, next_status.id)
-
-    # Re-render the display with updated status
-    _push_display(
-        oepl,
-        tag,
-        assignment.issue_number,
-        assignment.issue_title,
-        next_status.name,
-        assignment.assignee,
-        cfg,
-    )
-
-
-def _next_status(current_status: str, options):
-    """Return the next status option after current_status, or None if already last."""
-    names = [o.name for o in options]
-    try:
-        idx = names.index(current_status)
-    except ValueError:
-        return options[0] if options else None
-    next_idx = idx + 1
-    if next_idx >= len(options):
-        return None  # at final status — do not wrap
-    return options[next_idx]
+    store.update_assignment_status(tag.mac, option.name, option.id)
+    _push_display(oepl, tag, assignment.issue_number, assignment.issue_title,
+                  option.name, assignment.assignee, cfg)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -328,10 +435,14 @@ def main():
         description="Physical Kanban board via OpenEPaperLink + GitHub Projects"
     )
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("sync", help="One-time sync: fetch sprint, refresh displays")
+    p_sync = sub.add_parser("sync", help="One-time sync: fetch sprint, refresh displays")
+    p_sync.add_argument("--force", action="store_true",
+                        help="Push all displays regardless of whether status changed")
     sub.add_parser("run", help="Run continuous service (NFC + periodic sync)")
     sub.add_parser("assign", help="Interactive: assign sprint tickets to tags")
-    sub.add_parser("register-nfc", help="Register NFC sticker UIDs for each tag")
+    p_reg = sub.add_parser("register-nfc", help="Register NFC sticker UIDs for each tag")
+    p_reg.add_argument("--force", action="store_true",
+                       help="Clear all existing NFC UIDs and re-register from scratch")
     sub.add_parser("status", help="Show current tag assignments")
     args = parser.parse_args()
 
@@ -347,7 +458,7 @@ def main():
 
     if args.cmd == "sync":
         meta = gh.get_project_meta()
-        do_sync(store, oepl, gh, meta, cfg)
+        do_sync(store, oepl, gh, meta, cfg, force=args.force)
 
     elif args.cmd == "run":
         try:
@@ -359,7 +470,7 @@ def main():
         do_assign(store, oepl, gh, cfg)
 
     elif args.cmd == "register-nfc":
-        do_register_nfc(store, cfg.nfc_device)
+        do_register_nfc(store, oepl, cfg, force=args.force)
 
     elif args.cmd == "status":
         do_status(store)

@@ -46,6 +46,29 @@ class OEPLClient:
         self._tagtype_cache[hw_type] = dims
         return dims
 
+    def set_fast_refresh(self, mac: str, interval_s: int = 15) -> bool:
+        """Ask the AP to have a tag check in every interval_s seconds.
+
+        OpenEPaperLink exposes this via POST /set_db with a nextCheckin field.
+        If your AP firmware uses a different endpoint, adjust accordingly.
+        """
+        try:
+            resp = self.session.post(
+                f"{self.base}/set_db",
+                json={"mac": mac, "nextCheckin": interval_s},
+                timeout=5,
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def set_fast_refresh_all(self, interval_s: int = 40) -> None:
+        """Set fast refresh for every known tag."""
+        for tag in self.get_tags():
+            mac = tag.get("mac", "")
+            if mac:
+                self.set_fast_refresh(mac, interval_s)
+
     def push_image(self, mac: str, image: Image.Image, dither: int = 0) -> bool:
         """Upload a PIL Image to the specified tag via /imgupload."""
         buf = BytesIO()

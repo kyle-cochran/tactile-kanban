@@ -5,8 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "nfcpy>=1.0.4",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
     "requests>=2.33.1",
+    "smbus2>=0.4.3",
 ]
