@@ -1,0 +1,16 @@
+[Unit]
+Description=Physical Kanban Board — e-paper + GitHub + NFC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/kanban-epaper
+EnvironmentFile=/home/pi/kanban-epaper/.env
+ExecStart=/home/pi/kanban-epaper/.venv/bin/python main.py run
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
