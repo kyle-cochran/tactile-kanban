@@ -27,14 +27,13 @@ load_dotenv(".env.example")
 
 # Tuples: (issue_num, title, status, assignee, sub_issues)
 _SAMPLES = [
-    (42, "Implement NFC scanning loop and background status service", "Todo",        "kyle",  ()),
-    (17, "Design e-paper card layout for sprint view",                "In Progress", "alice", (18, 19, 20)),
-    (8,  "Set up Raspberry Pi service with systemd unit file",        "Done",        "bob",   ()),
-    (55, "Wire up GitHub Projects v2 GraphQL mutation for status",    "In Review",   "kyle",  (56, 57)),
-    (3,  "Add NFC tag registration workflow to CLI",                  "Blocked",     "kyle",  ()),
-    (99, "Write deployment docs and initial README",                  "Backlog",     "",      ()),
-    (12, "Migrate auth service to new token format",                  "Aborted",     "alice", (13, 14, 15, 16)),
-    (7,  "Investigate display flicker on cold boot",                  "Ready",       "",      ()),
+    (42, "Implement NFC scanning loop and background status service", "Needs Triage", "kyle",  ()),
+    (17, "Design e-paper card layout for sprint view",                "In Progress",  "alice", (18, 19, 20)),
+    (8,  "Set up Raspberry Pi service with systemd unit file",        "Done",         "bob",   ()),
+    (55, "Wire up GitHub Projects v2 GraphQL mutation for status",    "In Review",    "kyle",  (56, 57)),
+    (3,  "Add NFC tag registration workflow to CLI",                  "Blocked",      "kyle",  ()),
+    (12, "Migrate auth service to new token format",                  "Aborted",      "alice", (13, 14, 15, 16)),
+    (7,  "Investigate display flicker on cold boot",                  "Ready",        "",      ()),
 ]
 
 

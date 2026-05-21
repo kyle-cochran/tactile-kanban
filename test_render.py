@@ -20,7 +20,7 @@ load_dotenv(".env") or load_dotenv(".env.example")
 from renderer import render_card
 
 SAMPLES = [
-    (42,  "Implement NFC scanning loop and background status service", "Todo",        "kyle"),
+    (42,  "Implement NFC scanning loop and background status service", "Needs Triage", "kyle"),
     (17,  "Design e-paper card layout for sprint view",                "In Progress", "alice"),
     (8,   "Set up Raspberry Pi service with systemd unit file",        "Done",        "bob"),
     (55,  "Wire up GitHub Projects v2 GraphQL mutation for status",    "In Review",   "kyle"),

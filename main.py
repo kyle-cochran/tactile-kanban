@@ -15,6 +15,7 @@ from oepl import OEPLClient
 from pn532 import PN532
 from renderer import (render_card, render_registered_confirmation, render_registration_prompt,
                       render_train_car, render_unused, render_waiting_prompt, _car_type_for_mac)
+from sounds import play_status_sound
 from store import Assignment, Store, TagRecord
 
 
@@ -383,6 +384,7 @@ def _handle_nfc_tap(uid: str, target_status: str, store: Store, oepl: OEPLClient
         return False
 
     store.update_assignment_status(tag.mac, option.name, option.id)
+    play_status_sound(option.name)
     _push_display(oepl, tag, assignment.issue_number, assignment.issue_title,
                   option.name, assignment.assignee, cfg, assignment.repo_name)
     return True

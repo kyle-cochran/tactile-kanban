@@ -60,7 +60,7 @@ class Store:
                     github_item_id   TEXT NOT NULL,
                     issue_number     INTEGER NOT NULL,
                     issue_title      TEXT NOT NULL,
-                    status           TEXT NOT NULL DEFAULT 'Todo',
+                    status           TEXT NOT NULL DEFAULT 'Ready',
                     status_option_id TEXT NOT NULL DEFAULT '',
                     assignee         TEXT NOT NULL DEFAULT '',
                     sprint_id        TEXT NOT NULL,
