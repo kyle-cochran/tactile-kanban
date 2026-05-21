@@ -9,6 +9,7 @@ Color palette (index-based) for B/W/R/Y tags:
 
 from __future__ import annotations
 
+import hashlib
 import math
 import random
 from pathlib import Path
@@ -275,6 +276,417 @@ def render_card(
     # Status symbol: bottom-right corner
     _draw_status_symbol(draw, img, sym_x, sym_y, sym_size, status, issue_number)
 
+    return img.convert("RGB")
+
+
+# ---------------------------------------------------------------------------
+# Train car rendering — used for the "unused tag" pool
+# ---------------------------------------------------------------------------
+
+# 0 = steam engine (always last pulled from unused pool)
+# 1-6 = rolling stock car types
+_NUM_CAR_TYPES = 7
+
+
+def _car_type_for_mac(mac: str) -> int:
+    """Deterministic car type 1-6 for a MAC address (0 = steam engine, assigned separately)."""
+    h = int(hashlib.md5(mac.encode()).hexdigest()[:8], 16)
+    return 1 + h % (_NUM_CAR_TYPES - 1)
+
+
+def _train_geo(H: int) -> tuple[int, int, int]:
+    """Returns (rail_y, wheel_r, axle_y) for canvas height H."""
+    rail_y = H - 9
+    wheel_r = max(7, H // 11)
+    axle_y = rail_y - wheel_r
+    return rail_y, wheel_r, axle_y
+
+
+def _draw_rails(draw: ImageDraw.ImageDraw, W: int, H: int) -> None:
+    rail_y = H - 9
+    tie_w = max(8, W // 28)
+    for tx in range(0, W, tie_w + 7):
+        draw.rectangle([tx, rail_y - 2, tx + tie_w, rail_y + 6], fill=1)
+    draw.line([(0, rail_y), (W - 1, rail_y)], fill=1, width=2)
+    draw.line([(0, rail_y + 4), (W - 1, rail_y + 4)], fill=1, width=2)
+
+
+def _wheel(draw: ImageDraw.ImageDraw, cx: int, cy: int, r: int) -> None:
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=1)
+    ir = max(2, r - 3)
+    draw.ellipse([cx - ir, cy - ir, cx + ir, cy + ir], fill=0)
+    draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=1)
+
+
+def _coupler(draw: ImageDraw.ImageDraw, x: int, y: int, right: bool = False) -> None:
+    d = 1 if right else -1
+    draw.rectangle([x, y - 2, x + d * 7, y + 2], fill=1)
+    draw.rectangle([x + d * 7, y - 4, x + d * 10, y + 4], fill=1)
+
+
+# --- Car type 0: Steam locomotive -------------------------------------------
+
+def _car_steam(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx = W // 9
+    rx = W - W // 9
+    span = rx - lx
+    cab_x = lx + span * 68 // 100
+    boiler_top = ay - H * 33 // 100
+    cab_top    = ay - H * 48 // 100
+
+    # Cowcatcher (angled wedge at front/left)
+    draw.polygon([(lx, boiler_top), (lx, ay), (lx - W // 22, ay + 4)], fill=1)
+
+    # Boiler body
+    draw.rectangle([lx, boiler_top, cab_x, ay], fill=1)
+
+    # Boiler bands (white lines)
+    for frac in (0.25, 0.50, 0.72):
+        bx = lx + int((cab_x - lx) * frac)
+        draw.line([(bx, boiler_top + 2), (bx, ay - 2)], fill=0, width=1)
+
+    # Sand dome
+    dome_cx = lx + (cab_x - lx) * 55 // 100
+    dome_r = max(5, W // 26)
+    draw.ellipse([dome_cx - dome_r, boiler_top - dome_r // 2,
+                  dome_cx + dome_r, boiler_top + dome_r], fill=1)
+
+    # Smokestack
+    stk_cx = lx + (cab_x - lx) // 6
+    stk_w  = max(5, W // 32)
+    stk_h  = max(10, H // 6)
+    stk_top = boiler_top - stk_h
+    draw.rectangle([stk_cx - stk_w // 2, stk_top + 4,
+                    stk_cx + stk_w // 2, boiler_top], fill=1)
+    draw.rectangle([stk_cx - stk_w // 2 - 3, stk_top,
+                    stk_cx + stk_w // 2 + 3, stk_top + 5], fill=1)
+
+    # Smoke puffs (filled circle + smaller white hollow inside)
+    for dx, dy, r in [(0, -8, 7), (6, -16, 6), (-4, -23, 5), (5, -30, 4)]:
+        px, py = stk_cx + dx, stk_top + dy
+        if py - r >= 2:
+            draw.ellipse([px - r, py - r, px + r, py + r], fill=1)
+            ir = r - 2
+            if ir > 1:
+                draw.ellipse([px - ir, py - ir, px + ir, py + ir], fill=0)
+
+    # Headlight (yellow circle on front face)
+    hl_r = max(3, W // 55)
+    hl_y = boiler_top + (ay - boiler_top) // 2
+    draw.ellipse([lx + 2, hl_y - hl_r, lx + 2 + hl_r * 2, hl_y + hl_r], fill=3)
+
+    # Cab body
+    draw.rectangle([cab_x, cab_top, rx, ay], fill=1)
+
+    # Cab windows (two white panes)
+    cw = max(5, (rx - cab_x) // 3 - 2)
+    ch = (ay - cab_top) // 3
+    for i in range(2):
+        wx = cab_x + 3 + i * (cw + 3)
+        if wx + cw < rx - 2:
+            draw.rectangle([wx, cab_top + 4, wx + cw, cab_top + 4 + ch], fill=0)
+
+    # Drive wheels (2 large)
+    dw1 = lx + (cab_x - lx) * 32 // 100
+    dw2 = lx + (cab_x - lx) * 62 // 100
+    _wheel(draw, dw1, ay, wr)
+    _wheel(draw, dw2, ay, wr)
+    # Connecting rod
+    draw.line([(dw1, ay - wr // 3), (dw2, ay - wr // 3)], fill=1, width=max(2, H // 28))
+
+    # Small pilot wheel (front)
+    swr = max(5, wr * 2 // 3)
+    _wheel(draw, lx + swr + 2, ay, swr)
+
+    # Small trailing wheel (under cab)
+    _wheel(draw, cab_x + (rx - cab_x) // 2, ay, swr)
+
+
+# --- Car type 1: Coal tender ------------------------------------------------
+
+def _car_tender(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 8, W - W // 8
+    car_top = ay - H * 38 // 100
+    coal_top = car_top - max(4, H // 12)
+
+    # Car body
+    draw.rectangle([lx, car_top, rx, ay], fill=1)
+
+    # Coal mound (slightly uneven filled shape on top)
+    mid = (lx + rx) // 2
+    draw.polygon([
+        (lx + 4, car_top),
+        (lx + 4, coal_top + 4),
+        (lx + (rx - lx) // 5, coal_top),
+        (mid - 5, coal_top - 5),
+        (mid + 8, coal_top - 3),
+        (rx - (rx - lx) // 5, coal_top + 2),
+        (rx - 4, car_top),
+    ], fill=1)
+
+    # Highlight lumps on coal (white dashes suggest texture)
+    for cx in range(lx + 12, rx - 10, 18):
+        draw.arc([cx, coal_top - 2, cx + 10, coal_top + 6], 200, 340, fill=0, width=1)
+
+    # Frame stripe
+    draw.line([(lx, ay - 3), (rx, ay - 3)], fill=0, width=1)
+
+    # Wheels (2)
+    span = rx - lx
+    for wx in [lx + span // 4, rx - span // 4]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+# --- Car type 2: Passenger car ----------------------------------------------
+
+def _car_passenger(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 10, W - W // 10
+    car_top = ay - H * 44 // 100
+    roof_h  = max(5, H // 14)
+    roof_top = car_top - roof_h
+
+    # Roof (slightly rounded via polygon)
+    roof_mid = (lx + rx) // 2
+    draw.polygon([
+        (lx + 6, car_top), (rx - 6, car_top),
+        (rx - 2, roof_top + roof_h // 2),
+        (roof_mid, roof_top),
+        (lx + 2, roof_top + roof_h // 2),
+    ], fill=1)
+
+    # Car body
+    draw.rectangle([lx, car_top, rx, ay], fill=1)
+
+    # Windows (row of white rectangles)
+    win_w = max(8, (rx - lx) // 8)
+    win_h = max(8, (ay - car_top) // 3)
+    win_y  = car_top + (ay - car_top) // 5
+    gap    = max(4, (rx - lx - 4) // 7 - win_w)
+    x = lx + 6
+    while x + win_w <= rx - 6:
+        draw.rectangle([x, win_y, x + win_w, win_y + win_h], fill=0)
+        x += win_w + gap
+
+    # Door line (center)
+    door_cx = (lx + rx) // 2
+    draw.line([(door_cx, car_top + 2), (door_cx, ay - 2)], fill=0, width=1)
+
+    # Bottom stripe
+    draw.line([(lx, ay - 4), (rx, ay - 4)], fill=0, width=2)
+
+    # Wheels (3 axles for a long car)
+    span = rx - lx
+    for wx in [lx + span // 5, (lx + rx) // 2, rx - span // 5]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+# --- Car type 3: Box car ----------------------------------------------------
+
+def _car_boxcar(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 9, W - W // 9
+    car_top = ay - H * 46 // 100
+
+    # Body
+    draw.rectangle([lx, car_top, rx, ay], fill=1)
+
+    # Roof cap (slightly raised)
+    draw.rectangle([lx - 2, car_top - 3, rx + 2, car_top + 2], fill=1)
+
+    # Sliding door (two panels with gap)
+    door_w = (rx - lx) * 28 // 100
+    door_cx = (lx + rx) // 2
+    door_h = (ay - car_top) * 7 // 10
+    # Left panel
+    draw.rectangle([door_cx - door_w, car_top + 4,
+                    door_cx - 2, car_top + 4 + door_h], fill=0)
+    draw.rectangle([door_cx - door_w, car_top + 4,
+                    door_cx - 2, car_top + 4 + door_h], outline=1)
+    # Right panel
+    draw.rectangle([door_cx + 2, car_top + 4,
+                    door_cx + door_w, car_top + 4 + door_h], fill=0)
+    draw.rectangle([door_cx + 2, car_top + 4,
+                    door_cx + door_w, car_top + 4 + door_h], outline=1)
+
+    # Door track rail
+    draw.line([(lx + 4, car_top + 3), (rx - 4, car_top + 3)], fill=0, width=1)
+
+    # Side bracing lines
+    for frac in (0.18, 0.82):
+        bx = lx + int((rx - lx) * frac)
+        draw.line([(bx, car_top + 2), (bx, ay - 2)], fill=0, width=1)
+
+    # Wheels (2)
+    span = rx - lx
+    for wx in [lx + span // 4, rx - span // 4]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+# --- Car type 4: Tank car ---------------------------------------------------
+
+def _car_tanker(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 9, W - W // 9
+    tank_r_v = H * 20 // 100          # vertical radius of tank
+    tank_cy  = ay - tank_r_v - H // 12  # vertical center of tank
+
+    # Underframe (thin rectangle below tank)
+    frame_y = ay - H // 8
+    draw.rectangle([lx, frame_y, rx, ay], fill=1)
+
+    # Tank body (fat ellipse / stadium shape)
+    tank_r_h = (rx - lx) // 2 - 4
+    draw.ellipse([lx + 4, tank_cy - tank_r_v, rx - 4, tank_cy + tank_r_v], fill=1)
+
+    # Tank bands (white arcs)
+    mid = (lx + rx) // 2
+    for bx in [mid - (rx - lx) // 4, mid, mid + (rx - lx) // 4]:
+        draw.line([(bx, tank_cy - tank_r_v + 2), (bx, tank_cy + tank_r_v - 2)], fill=0, width=1)
+
+    # Dome valve on top
+    dome_r = max(4, W // 28)
+    draw.ellipse([(lx + rx) // 2 - dome_r, tank_cy - tank_r_v - dome_r * 2,
+                  (lx + rx) // 2 + dome_r, tank_cy - tank_r_v + 2], fill=1)
+
+    # Safety valve nub on dome
+    dv_x = (lx + rx) // 2
+    draw.rectangle([dv_x - 2, tank_cy - tank_r_v - dome_r * 2 - 4,
+                    dv_x + 2, tank_cy - tank_r_v - dome_r * 2], fill=1)
+
+    # Support legs from tank to frame
+    for leg_x in [lx + (rx - lx) // 4, rx - (rx - lx) // 4]:
+        draw.line([(leg_x, tank_cy + tank_r_v), (leg_x, frame_y)], fill=1, width=2)
+
+    # Wheels (2)
+    span = rx - lx
+    for wx in [lx + span // 4, rx - span // 4]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+# --- Car type 5: Flat car with log load -------------------------------------
+
+def _car_flatcar(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 9, W - W // 9
+    deck_y = ay - H * 18 // 100   # top of deck
+    deck_h = max(4, H // 18)
+
+    # Deck (thin flat platform)
+    draw.rectangle([lx, deck_y, rx, deck_y + deck_h], fill=1)
+
+    # Stake pockets (small vertical rectangles at edges)
+    for sx in [lx + 8, lx + (rx - lx) // 3, rx - (rx - lx) // 3, rx - 8]:
+        draw.rectangle([sx - 2, deck_y - 6, sx + 2, deck_y], fill=1)
+
+    # Log stack: rows of overlapping circles
+    log_r = max(5, H // 15)
+    cols = max(3, (rx - lx) // (log_r * 2 + 2))
+    rows = 2
+    total_w = cols * (log_r * 2 + 1)
+    log_start_x = (lx + rx - total_w) // 2 + log_r
+    for row in range(rows):
+        offset = log_r * row // 2  # stagger upper row
+        base_y = deck_y - log_r - row * (log_r * 2 - 2)
+        for col in range(cols - row):
+            lc_x = log_start_x + col * (log_r * 2 + 1) + offset
+            # Log end-on: filled circle with ring
+            draw.ellipse([lc_x - log_r, base_y - log_r,
+                          lc_x + log_r, base_y + log_r], fill=1)
+            ir = max(2, log_r - 3)
+            draw.ellipse([lc_x - ir, base_y - ir, lc_x + ir, base_y + ir], fill=0)
+            draw.ellipse([lc_x - 2, base_y - 2, lc_x + 2, base_y + 2], fill=1)
+
+    # Wheels (2)
+    span = rx - lx
+    for wx in [lx + span // 4, rx - span // 4]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+# --- Car type 6: Caboose (red) ----------------------------------------------
+
+def _car_caboose(draw: ImageDraw.ImageDraw, img: Image.Image, W: int, H: int) -> None:
+    _, wr, ay = _train_geo(H)
+    lx, rx = W // 9, W - W // 9
+    car_top  = ay - H * 42 // 100
+    cup_w    = (rx - lx) * 40 // 100
+    cup_x    = (lx + rx - cup_w) // 2
+    cup_top  = car_top - H * 20 // 100
+
+    # Main body (red)
+    draw.rectangle([lx, car_top, rx, ay], fill=2)
+
+    # Roof (black)
+    draw.rectangle([lx - 2, car_top - 3, rx + 2, car_top + 2], fill=1)
+
+    # Cupola sides and roof (black outline, red fill)
+    draw.rectangle([cup_x, cup_top, cup_x + cup_w, car_top], fill=2)
+    draw.rectangle([cup_x - 2, cup_top - 3, cup_x + cup_w + 2, cup_top + 2], fill=1)
+
+    # Cupola windows
+    cwin_w = max(5, cup_w // 4)
+    cwin_h = max(4, (car_top - cup_top) // 2)
+    for i in range(2):
+        wx = cup_x + 4 + i * (cup_w - cwin_w * 2 - 4)
+        draw.rectangle([wx, cup_top + 3, wx + cwin_w, cup_top + 3 + cwin_h], fill=0)
+
+    # Body windows
+    win_w = max(8, (rx - lx) // 6)
+    win_h = max(7, (ay - car_top) // 3)
+    win_y  = car_top + (ay - car_top) // 5
+    for wx in [lx + 6, rx - 6 - win_w]:
+        draw.rectangle([wx, win_y, wx + win_w, win_y + win_h], fill=0)
+
+    # Bottom trim stripe (black)
+    draw.line([(lx, ay - 4), (rx, ay - 4)], fill=1, width=2)
+
+    # Wheels (2)
+    span = rx - lx
+    for wx in [lx + span // 4, rx - span // 4]:
+        _wheel(draw, wx, ay, wr)
+
+    _coupler(draw, lx, ay - wr // 2, right=False)
+    _coupler(draw, rx, ay - wr // 2, right=True)
+
+
+_CAR_DRAWERS = [
+    _car_steam, _car_tender, _car_passenger, _car_boxcar,
+    _car_tanker, _car_flatcar, _car_caboose,
+]
+
+
+def render_train_car(
+    width: int,
+    height: int,
+    car_type: int,
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+) -> Image.Image:
+    """Render a train car of the given type (0=steam engine, 1-6=rolling stock)."""
+    img = Image.new("P", (width, height))
+    img.putpalette(_PALETTE_RGB)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, width - 1, height - 1], fill=0)
+    _draw_rails(draw, width, height)
+    car_type = max(0, min(car_type, _NUM_CAR_TYPES - 1))
+    _CAR_DRAWERS[car_type](draw, img, width, height)
     return img.convert("RGB")
 
 

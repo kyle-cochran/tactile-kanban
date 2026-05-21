@@ -13,7 +13,8 @@ from github_client import GitHubClient, ProjectMeta, SprintItem
 from nfc import NfcReader
 from oepl import OEPLClient
 from pn532 import PN532
-from renderer import render_card, render_registered_confirmation, render_registration_prompt, render_unused, render_waiting_prompt
+from renderer import (render_card, render_registered_confirmation, render_registration_prompt,
+                      render_train_car, render_unused, render_waiting_prompt, _car_type_for_mac)
 from store import Assignment, Store, TagRecord
 
 
@@ -89,9 +90,10 @@ def do_sync(
             print(f"  [sync] #{item.issue_number} ({item.status}) — no change, skipping")
 
     # Auto-assign any unassigned sprint items to vacant tags
+    # Sort by MAC ascending so the lexicographically largest MAC (steam engine) is consumed last
     assigned_item_ids = {a.github_item_id for _, a in store.get_all_assignments()}
     unassigned_items = [i for i in items if i.item_id not in assigned_item_ids]
-    vacant_tags = store.get_unassigned_tags()
+    vacant_tags = sorted(store.get_unassigned_tags(), key=lambda t: t.mac)
 
     for item, tag in zip(unassigned_items, vacant_tags):
         assignee = item.assignees[0] if item.assignees else ""
@@ -114,12 +116,16 @@ def do_sync(
     if item_leftover > 0:
         print(f"[sync] {item_leftover} sprint item(s) have no tag to assign to")
 
-    # Tags still vacant after auto-assignment get an "unused" display
+    # Tags still vacant after auto-assignment get a train car display
     used_count = min(len(unassigned_items), len(vacant_tags))
-    for tag in vacant_tags[used_count:]:
-        _push_unused(oepl, tag, cfg)
-        label = tag.alias or tag.mac[:12]
-        print(f"  [sync] no ticket available → {label} marked unused")
+    leftover_tags = vacant_tags[used_count:]
+    if leftover_tags:
+        steam_mac = max(t.mac for t in leftover_tags)
+        for tag in leftover_tags:
+            car_type = 0 if tag.mac == steam_mac else _car_type_for_mac(tag.mac)
+            _push_unused(oepl, tag, cfg, car_type)
+            label = tag.alias or tag.mac[:12]
+            print(f"  [sync] no ticket available → {label} marked unused")
 
     return unassigned_items
 
@@ -415,10 +421,11 @@ def do_status(store: Store):
 # ---------------------------------------------------------------------------
 
 
-def _push_unused(oepl: OEPLClient, tag: TagRecord, cfg):
+def _push_unused(oepl: OEPLClient, tag: TagRecord, cfg, car_type: int = 0):
     if tag.width == 0 or tag.height == 0:
         return
-    img = render_unused(tag.width, tag.height, font_path=cfg.font_path, font_bold_path=cfg.font_bold_path)
+    img = render_train_car(tag.width, tag.height, car_type,
+                           font_path=cfg.font_path, font_bold_path=cfg.font_bold_path)
     oepl.push_image(tag.mac, img)
 
 
