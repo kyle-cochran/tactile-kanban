@@ -10,6 +10,7 @@ Color palette (index-based) for B/W/R/Y tags:
 from __future__ import annotations
 
 import math
+import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -99,8 +100,8 @@ def _sym_in_review(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> No
     draw.polygon([(bl, bb), (bl + tw, bb), (bl, by + size - 1 - m)], fill=1)
 
 
-def _sym_ready_flower(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
-    """Yellow flower with black-outlined petals, stem, and leaf for Ready status."""
+def _sym_ready_flower(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int, petal_fill: int = 3) -> None:
+    """Flower with black-outlined petals, stem, and leaf for Ready status."""
     cx = bx + size // 2
     cy = by + size // 3       # flower head in upper third, leaving room for stem
 
@@ -121,7 +122,7 @@ def _sym_ready_flower(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) ->
     lh = max(2, size // 9)
     draw.ellipse([cx + 1, leaf_y - lh, cx + lw, leaf_y + lh], fill=1)
 
-    # Petals: black shadow ellipse first, then yellow on top → visible outline
+    # Petals: black shadow ellipse first, then colored on top → visible outline
     for i in range(6):
         angle = math.radians(i * 60)
         px = cx + int(petal_d * math.cos(angle))
@@ -129,7 +130,7 @@ def _sym_ready_flower(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) ->
         draw.ellipse([px - petal_r - 1, py - petal_r - 1,
                       px + petal_r + 1, py + petal_r + 1], fill=1)
         draw.ellipse([px - petal_r, py - petal_r,
-                      px + petal_r, py + petal_r], fill=3)
+                      px + petal_r, py + petal_r], fill=petal_fill)
 
     # Black center dot
     draw.ellipse([cx - center_r, cy - center_r,
@@ -156,6 +157,7 @@ def _draw_status_symbol(
     by: int,
     size: int,
     status: str,
+    issue_number: int = 0,
 ) -> None:
     s = status.lower().strip()
     if s == "in progress":
@@ -169,7 +171,8 @@ def _draw_status_symbol(
     elif s == "in review":
         _sym_in_review(draw, bx, by, size)
     elif s == "ready":
-        _sym_ready_flower(draw, bx, by, size)
+        petal_fill = random.Random(issue_number).choice([2, 3])  # stable per issue
+        _sym_ready_flower(draw, bx, by, size, petal_fill)
     else:
         _sym_outline(draw, bx, by, size)
 
@@ -270,7 +273,7 @@ def render_card(
         draw.text((4, sym_y + (sym_size - ah) // 2), assignee_text, fill=1, font=font_small)
 
     # Status symbol: bottom-right corner
-    _draw_status_symbol(draw, img, sym_x, sym_y, sym_size, status)
+    _draw_status_symbol(draw, img, sym_x, sym_y, sym_size, status, issue_number)
 
     return img.convert("RGB")
 
