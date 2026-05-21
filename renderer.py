@@ -9,6 +9,7 @@ Color palette (index-based) for B/W/R/Y tags:
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -98,6 +99,43 @@ def _sym_in_review(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> No
     draw.polygon([(bl, bb), (bl + tw, bb), (bl, by + size - 1 - m)], fill=1)
 
 
+def _sym_ready_flower(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    """Yellow flower with black-outlined petals, stem, and leaf for Ready status."""
+    cx = bx + size // 2
+    cy = by + size // 3       # flower head in upper third, leaving room for stem
+
+    petal_r  = max(2, size // 7)
+    petal_d  = max(3, size // 5)
+    center_r = max(1, size // 9)
+    stem_lw  = max(1, size // 12)
+
+    stem_top = cy + petal_d + petal_r - 1
+    stem_bot = by + size - 1
+
+    # Stem (drawn first so petals sit on top)
+    draw.line([(cx, stem_top), (cx, stem_bot)], fill=1, width=stem_lw)
+
+    # Leaf: small filled ellipse branching right from mid-stem
+    leaf_y = stem_top + (stem_bot - stem_top) // 2
+    lw = max(3, size // 5)
+    lh = max(2, size // 9)
+    draw.ellipse([cx + 1, leaf_y - lh, cx + lw, leaf_y + lh], fill=1)
+
+    # Petals: black shadow ellipse first, then yellow on top → visible outline
+    for i in range(6):
+        angle = math.radians(i * 60)
+        px = cx + int(petal_d * math.cos(angle))
+        py = cy + int(petal_d * math.sin(angle))
+        draw.ellipse([px - petal_r - 1, py - petal_r - 1,
+                      px + petal_r + 1, py + petal_r + 1], fill=1)
+        draw.ellipse([px - petal_r, py - petal_r,
+                      px + petal_r, py + petal_r], fill=3)
+
+    # Black center dot
+    draw.ellipse([cx - center_r, cy - center_r,
+                  cx + center_r, cy + center_r], fill=1)
+
+
 def _draw_drop_arrow(draw: ImageDraw.ImageDraw, x: int, y: int, size: int) -> None:
     """Draw a ↳-style drop arrow fitting in a square of `size` pixels."""
     lw = max(1, size // 7)
@@ -130,8 +168,9 @@ def _draw_status_symbol(
         _sym_blocked(draw, bx, by, size)
     elif s == "in review":
         _sym_in_review(draw, bx, by, size)
+    elif s == "ready":
+        _sym_ready_flower(draw, bx, by, size)
     else:
-        # Ready, Todo, Backlog, Needs Triage — empty outline
         _sym_outline(draw, bx, by, size)
 
 
