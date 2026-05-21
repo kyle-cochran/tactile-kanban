@@ -25,13 +25,16 @@ from dotenv import load_dotenv
 load_dotenv(".env")
 load_dotenv(".env.example")
 
+# Tuples: (issue_num, title, status, assignee, sub_issues)
 _SAMPLES = [
-    (42, "Implement NFC scanning loop and background status service", "Todo",        "kyle"),
-    (17, "Design e-paper card layout for sprint view",                "In Progress", "alice"),
-    (8,  "Set up Raspberry Pi service with systemd unit file",        "Done",        "bob"),
-    (55, "Wire up GitHub Projects v2 GraphQL mutation for status",    "In Review",   "kyle"),
-    (3,  "Add NFC tag registration workflow to CLI",                  "Blocked",     "kyle"),
-    (99, "Write deployment docs and initial README",                  "Backlog",     ""),
+    (42, "Implement NFC scanning loop and background status service", "Todo",        "kyle",  ()),
+    (17, "Design e-paper card layout for sprint view",                "In Progress", "alice", (18, 19, 20)),
+    (8,  "Set up Raspberry Pi service with systemd unit file",        "Done",        "bob",   ()),
+    (55, "Wire up GitHub Projects v2 GraphQL mutation for status",    "In Review",   "kyle",  (56, 57)),
+    (3,  "Add NFC tag registration workflow to CLI",                  "Blocked",     "kyle",  ()),
+    (99, "Write deployment docs and initial README",                  "Backlog",     "",      ()),
+    (12, "Migrate auth service to new token format",                  "Aborted",     "alice", (13, 14, 15, 16)),
+    (7,  "Investigate display flicker on cold boot",                  "Ready",       "",      ()),
 ]
 
 
@@ -41,7 +44,7 @@ def _img_to_b64(img) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def _load_db_cards(db_path: str, default_w: int, default_h: int) -> list[dict]:
+def _load_db_cards(db_path: str, default_w: int, default_h: int, repo_name: str = "") -> list[dict]:
     if not Path(db_path).exists():
         return []
     try:
@@ -57,6 +60,7 @@ def _load_db_cards(db_path: str, default_w: int, default_h: int) -> list[dict]:
                 "title":        assignment.issue_title,
                 "status":       assignment.status,
                 "assignee":     assignment.assignee,
+                "repo_name":    repo_name,
                 "source": "db",
             })
         return cards
@@ -66,11 +70,11 @@ def _load_db_cards(db_path: str, default_w: int, default_h: int) -> list[dict]:
 
 
 def _build_card_list(
-    db_path: str, size_override: tuple[int, int] | None
+    db_path: str, size_override: tuple[int, int] | None, repo_name: str = ""
 ) -> list[dict]:
     default_w, default_h = size_override or (296, 128)
-    cards = _load_db_cards(db_path, default_w, default_h)
-    for issue_num, title, status, assignee in _SAMPLES:
+    cards = _load_db_cards(db_path, default_w, default_h, repo_name)
+    for issue_num, title, status, assignee, sub_issues in _SAMPLES:
         w = size_override[0] if size_override else default_w
         h = size_override[1] if size_override else default_h
         cards.append({
@@ -78,17 +82,19 @@ def _build_card_list(
             "width": w, "height": h,
             "issue_number": issue_num,
             "title": title, "status": status, "assignee": assignee,
+            "repo_name": repo_name,
+            "sub_issues": sub_issues,
             "source": "sample",
         })
     return cards
 
 
-def render_html(db_path: str, size_override: tuple[int, int] | None) -> str:
+def render_html(db_path: str, size_override: tuple[int, int] | None, repo_name: str = "") -> str:
     """Render all cards to an HTML string. Re-imports renderer each call."""
     import renderer as _r
     importlib.reload(_r)
 
-    cards = _build_card_list(db_path, size_override)
+    cards = _build_card_list(db_path, size_override, repo_name)
     max_w = max(c["width"] * 2 for c in cards)
 
     card_blocks = []
@@ -97,6 +103,8 @@ def render_html(db_path: str, size_override: tuple[int, int] | None) -> str:
             width=c["width"], height=c["height"],
             issue_number=c["issue_number"], title=c["title"],
             status=c["status"], assignee=c["assignee"],
+            repo_name=c.get("repo_name", ""),
+            sub_issues=c.get("sub_issues", ()),
         )
         b64 = _img_to_b64(img)
         badge = (
@@ -155,6 +163,10 @@ def main() -> None:
         help="Override tag dimensions, e.g. 296x128",
     )
     parser.add_argument(
+        "--repo", default="tactile-kanban",
+        help="Repo name shown in card header (default: tactile-kanban)",
+    )
+    parser.add_argument(
         "--db", default=os.environ.get("DB_PATH", "kanban.db"),
         help="SQLite DB path (default: kanban.db)",
     )
@@ -168,10 +180,11 @@ def main() -> None:
     if args.serve:
         db_path = args.db
         so = size_override
+        repo = args.repo
 
         class _Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                html = render_html(db_path, so).encode()
+                html = render_html(db_path, so, repo).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(html)))
@@ -187,7 +200,7 @@ def main() -> None:
         webbrowser.open(url)
         http.server.HTTPServer(("", args.port), _Handler).serve_forever()
     else:
-        html = render_html(args.db, size_override)
+        html = render_html(args.db, size_override, args.repo)
         out = Path("preview.html")
         out.write_text(html)
         print(f"Saved {out}")

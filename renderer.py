@@ -22,28 +22,118 @@ _PALETTE_RGB = [
     255, 255, 0,   # 3 yellow
 ] + [0] * (256 * 3 - 12)
 
-# Status → (accent_fill, text_on_accent)
-# accent_fill: palette index for the status bar background
-# text_on_accent: palette index for text drawn on top of it
-_STATUS_THEME: dict[str, tuple[int, int]] = {
-    "needs triage": (3, 1),  # yellow bar, black text — attention needed
-    "todo":         (3, 1),  # yellow bar, black text
-    "ready":        (3, 1),  # yellow bar, black text — queued up
-    "in progress":  (2, 0),  # red bar, white text — active
-    "in review":    (2, 0),  # red bar, white text — active review
-    "blocked":      (2, 0),  # red bar, white text — urgent
-    "done":         (1, 0),  # black bar, white text — completed
-    "aborted":      (1, 0),  # black bar, white text — terminal
-    "backlog":      (1, 0),  # black bar, white text
-}
-
 
 def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
     p = Path(path)
     if p.exists():
         return ImageFont.truetype(str(p), size)
-    # Fallback to Pillow's built-in bitmap font
     return ImageFont.load_default()
+
+
+# ---------------------------------------------------------------------------
+# Status symbol helpers — each draws into a square at (bx, by) of `size` px
+# ---------------------------------------------------------------------------
+
+def _sym_outline(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    draw.rectangle([bx, by, bx + size - 1, by + size - 1], outline=1, fill=0)
+
+
+def _sym_stripes(
+    draw: ImageDraw.ImageDraw, img: Image.Image, bx: int, by: int, size: int
+) -> None:
+    """45-degree alternating black/white stripes (In Progress)."""
+    stripe_w = max(2, size // 4)
+    for row in range(size):
+        for col in range(size):
+            color = 1 if ((col + row) // stripe_w) % 2 == 0 else 0
+            img.putpixel((bx + col, by + row), color)
+
+
+def _sym_done(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    """White checkmark on a filled black box."""
+    draw.rectangle([bx, by, bx + size - 1, by + size - 1], fill=1)
+    m = max(2, size // 6)
+    lw = max(2, size // 10)
+    cx = bx + m + (size - 2 * m) // 3
+    cy = by + size - m
+    draw.line([(bx + m, by + size // 2), (cx, cy)], fill=0, width=lw)
+    draw.line([(cx, cy), (bx + size - m, by + m)], fill=0, width=lw)
+
+
+def _sym_aborted(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    """White X on a filled black box."""
+    draw.rectangle([bx, by, bx + size - 1, by + size - 1], fill=1)
+    m = max(2, size // 5)
+    lw = max(2, size // 10)
+    draw.line([(bx + m, by + m), (bx + size - m, by + size - m)], fill=0, width=lw)
+    draw.line([(bx + size - m, by + m), (bx + m, by + size - m)], fill=0, width=lw)
+
+
+def _sym_blocked(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    """Red octagon inside an empty box outline (Blocked)."""
+    _sym_outline(draw, bx, by, size)
+    m = max(2, size // 6)
+    cut = max(2, (size - 2 * m) // 3)
+    l, r = bx + m, bx + size - 1 - m
+    t, b = by + m, by + size - 1 - m
+    draw.polygon([
+        l + cut, t,
+        r - cut, t,
+        r,       t + cut,
+        r,       b - cut,
+        r - cut, b,
+        l + cut, b,
+        l,       b - cut,
+        l,       t + cut,
+    ], fill=2)  # red
+
+
+def _sym_in_review(draw: ImageDraw.ImageDraw, bx: int, by: int, size: int) -> None:
+    """Speech bubble inside an empty box outline (In Review)."""
+    _sym_outline(draw, bx, by, size)
+    m = max(2, size // 7)
+    bl, br = bx + m, bx + size - 1 - m
+    bt, bb = by + m, by + int(size * 0.62)
+    draw.rectangle([bl, bt, br, bb], fill=1)
+    tw = max(2, size // 4)
+    draw.polygon([(bl, bb), (bl + tw, bb), (bl, by + size - 1 - m)], fill=1)
+
+
+def _draw_drop_arrow(draw: ImageDraw.ImageDraw, x: int, y: int, size: int) -> None:
+    """Draw a ↳-style drop arrow fitting in a square of `size` pixels."""
+    lw = max(1, size // 7)
+    stem_x = x + lw // 2
+    turn_y = y + (size * 2) // 3
+    tip_x  = x + size - 1
+    aw = max(2, size // 4)
+    draw.line([(stem_x, y), (stem_x, turn_y)], fill=1, width=lw)
+    draw.line([(stem_x, turn_y), (tip_x, turn_y)], fill=1, width=lw)
+    draw.line([(tip_x - aw, turn_y - aw), (tip_x, turn_y)], fill=1, width=lw)
+    draw.line([(tip_x - aw, turn_y + aw), (tip_x, turn_y)], fill=1, width=lw)
+
+
+def _draw_status_symbol(
+    draw: ImageDraw.ImageDraw,
+    img: Image.Image,
+    bx: int,
+    by: int,
+    size: int,
+    status: str,
+) -> None:
+    s = status.lower().strip()
+    if s == "in progress":
+        _sym_stripes(draw, img, bx, by, size)
+    elif s == "done":
+        _sym_done(draw, bx, by, size)
+    elif s == "aborted":
+        _sym_aborted(draw, bx, by, size)
+    elif s == "blocked":
+        _sym_blocked(draw, bx, by, size)
+    elif s == "in review":
+        _sym_in_review(draw, bx, by, size)
+    else:
+        # Ready, Todo, Backlog, Needs Triage — empty outline
+        _sym_outline(draw, bx, by, size)
 
 
 def render_card(
@@ -53,6 +143,8 @@ def render_card(
     title: str,
     status: str,
     assignee: str,
+    repo_name: str = "",
+    sub_issues: tuple[int, ...] = (),
     font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 ) -> Image.Image:
@@ -60,9 +152,6 @@ def render_card(
     img.putpalette(_PALETTE_RGB)
     draw = ImageDraw.Draw(img)
 
-    accent_fill, accent_text = _STATUS_THEME.get(status.lower(), (1, 0))
-
-    # Scale font sizes proportionally to tag height
     size_large = max(12, height // 7)
     size_medium = max(10, height // 9)
     size_small = max(8, height // 11)
@@ -71,27 +160,27 @@ def render_card(
     font_medium = _load_font(font_path, size_medium)
     font_small = _load_font(font_path, size_small)
 
-    header_h = size_large + 8
-    footer_h = size_small + 10
+    # Status symbol: square in bottom-right corner, 1/5 of tag height
+    sym_size = height // 5
+    sym_x = width - sym_size
+    sym_y = height - sym_size
 
     # White background
     draw.rectangle([0, 0, width - 1, height - 1], fill=0)
 
-    # Header: black bar with issue number in yellow
-    draw.rectangle([0, 0, width - 1, header_h - 1], fill=1)
-    issue_label = f"#{issue_number}"
+    # Header: repo name (left) and [#issue] (right), bold on white
+    issue_label = f"[#{issue_number}]"
     bbox = draw.textbbox((0, 0), issue_label, font=font_large)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(
-        ((width - tw) // 2, (header_h - th) // 2),
-        issue_label,
-        fill=3,  # yellow issue number on black header
-        font=font_large,
-    )
+    iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    header_h = ih + 8
 
-    # Body: title text on white
+    if repo_name:
+        draw.text((4, 4), repo_name, fill=1, font=font_large)
+    draw.text((width - iw - 4, 4), issue_label, fill=1, font=font_large)
+
+    # Body: title text, stopping above the symbol row
     body_top = header_h + 4
-    body_bottom = height - footer_h - 4
+    body_bottom = sym_y - 4
 
     avg_char_w = max(1, draw.textlength("M", font=font_medium))
     chars_per_line = max(1, int((width - 8) / avg_char_w))
@@ -105,22 +194,24 @@ def render_card(
         draw.text((4, y), line, fill=1, font=font_medium)
         y += line_h
 
-    # Footer: status-colored bar (yellow/red/black) with status label + assignee
-    draw.rectangle([0, height - footer_h, width - 1, height - 1], fill=accent_fill)
+    # Sub-issues row: ↳ [#98] [#87] [#101]
+    if sub_issues:
+        sub_line_h = size_small + 3
+        if y + sub_line_h <= body_bottom:
+            arrow_w = size_small + 4
+            _draw_drop_arrow(draw, 4, y, size_small)
+            sub_text = " ".join(f"[#{n}]" for n in sub_issues)
+            draw.text((4 + arrow_w, y), sub_text, fill=1, font=font_small)
 
-    status_text = status.upper()
-    draw.text((4, height - footer_h + 3), status_text, fill=accent_text, font=font_small)
-
+    # Assignee: left-aligned, vertically centred in the symbol row
     if assignee:
         assignee_text = f"@{assignee}"
         bbox = draw.textbbox((0, 0), assignee_text, font=font_small)
-        aw = bbox[2] - bbox[0]
-        draw.text(
-            (width - aw - 4, height - footer_h + 3),
-            assignee_text,
-            fill=accent_text,
-            font=font_small,
-        )
+        ah = bbox[3] - bbox[1]
+        draw.text((4, sym_y + (sym_size - ah) // 2), assignee_text, fill=1, font=font_small)
+
+    # Status symbol: bottom-right corner
+    _draw_status_symbol(draw, img, sym_x, sym_y, sym_size, status)
 
     return img.convert("RGB")
 
