@@ -9,7 +9,6 @@ Color palette (index-based) for B/W/R/Y tags:
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -190,9 +189,22 @@ def render_card(
     body_top = header_h + 4
     body_bottom = sym_y - 4
 
-    avg_char_w = max(1, draw.textlength("M", font=font_medium))
-    chars_per_line = max(1, int((width - 8) / avg_char_w))
-    lines = textwrap.wrap(title, width=chars_per_line) or [title]
+    avail_w = width - 8  # 4px padding each side
+    words = title.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = (current + " " + word).strip()
+        if draw.textlength(candidate, font=font_medium) <= avail_w:
+            current = candidate
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    if not lines:
+        lines = [title]
 
     line_h = size_medium + 3
     y = body_top
@@ -220,6 +232,27 @@ def render_card(
 
     # Status symbol: bottom-right corner
     _draw_status_symbol(draw, img, sym_x, sym_y, sym_size, status)
+
+    return img.convert("RGB")
+
+
+def render_unused(
+    width: int,
+    height: int,
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    font_bold_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+) -> Image.Image:
+    """Render a simple 'unused' placeholder for tags with no current sprint item."""
+    img = Image.new("P", (width, height))
+    img.putpalette(_PALETTE_RGB)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([0, 0, width - 1, height - 1], fill=0)
+
+    font = _load_font(font_bold_path, max(12, height // 7))
+    text = "unused"
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((width - tw) // 2, (height - th) // 2), text, fill=1, font=font)
 
     return img.convert("RGB")
 

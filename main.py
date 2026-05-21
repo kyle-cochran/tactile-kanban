@@ -13,7 +13,7 @@ from github_client import GitHubClient, ProjectMeta, SprintItem
 from nfc import NfcReader
 from oepl import OEPLClient
 from pn532 import PN532
-from renderer import render_card, render_registered_confirmation, render_registration_prompt, render_waiting_prompt
+from renderer import render_card, render_registered_confirmation, render_registration_prompt, render_unused, render_waiting_prompt
 from store import Assignment, Store, TagRecord
 
 
@@ -62,7 +62,9 @@ def do_sync(
         label = tag.alias or tag.mac[:12]
         item = item_map.get(assignment.github_item_id)
         if item is None:
-            print(f"  [sync] {label} — item {assignment.github_item_id} not in current sprint, skipping")
+            store.remove_assignment(tag.mac)
+            _push_unused(oepl, tag, cfg)
+            print(f"  [sync] {label} — not in current sprint, marked unused")
             continue
 
         status_changed = item.status != assignment.status
@@ -108,9 +110,16 @@ def do_sync(
         label = tag.alias or tag.mac[:12]
         print(f"  [sync] auto-assigned #{item.issue_number} → {label}")
 
-    leftover = len(unassigned_items) - len(vacant_tags)
-    if leftover > 0:
-        print(f"[sync] {leftover} sprint item(s) have no tag to assign to")
+    item_leftover = len(unassigned_items) - len(vacant_tags)
+    if item_leftover > 0:
+        print(f"[sync] {item_leftover} sprint item(s) have no tag to assign to")
+
+    # Tags still vacant after auto-assignment get an "unused" display
+    used_count = min(len(unassigned_items), len(vacant_tags))
+    for tag in vacant_tags[used_count:]:
+        _push_unused(oepl, tag, cfg)
+        label = tag.alias or tag.mac[:12]
+        print(f"  [sync] no ticket available → {label} marked unused")
 
     return unassigned_items
 
@@ -404,6 +413,13 @@ def do_status(store: Store):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _push_unused(oepl: OEPLClient, tag: TagRecord, cfg):
+    if tag.width == 0 or tag.height == 0:
+        return
+    img = render_unused(tag.width, tag.height, font_path=cfg.font_path, font_bold_path=cfg.font_bold_path)
+    oepl.push_image(tag.mac, img)
 
 
 def _push_display(oepl: OEPLClient, tag: TagRecord, issue_number: int, title: str, status: str, assignee: str, cfg, repo_name: str = ""):
