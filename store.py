@@ -26,6 +26,7 @@ class Assignment:
     assignee: str
     sprint_id: str
     assigned_at: str
+    repo_name: str = ""
 
 
 class Store:
@@ -63,9 +64,15 @@ class Store:
                     status_option_id TEXT NOT NULL DEFAULT '',
                     assignee         TEXT NOT NULL DEFAULT '',
                     sprint_id        TEXT NOT NULL,
-                    assigned_at      TEXT NOT NULL
+                    assigned_at      TEXT NOT NULL,
+                    repo_name        TEXT NOT NULL DEFAULT ''
                 );
             """)
+            # Migration: add repo_name to existing databases that predate this column
+            try:
+                conn.execute("ALTER TABLE assignments ADD COLUMN repo_name TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                pass  # column already exists
 
     def upsert_tag(self, mac: str, width: int, height: int, alias: str = ""):
         with self._conn() as conn:
@@ -112,14 +119,15 @@ class Store:
         status_option_id: str,
         assignee: str,
         sprint_id: str,
+        repo_name: str = "",
     ):
         with self._conn() as conn:
             conn.execute(
                 """
                 INSERT INTO assignments
                     (mac, github_item_id, issue_number, issue_title,
-                     status, status_option_id, assignee, sprint_id, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, status_option_id, assignee, sprint_id, assigned_at, repo_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mac) DO UPDATE SET
                     github_item_id   = excluded.github_item_id,
                     issue_number     = excluded.issue_number,
@@ -128,7 +136,8 @@ class Store:
                     status_option_id = excluded.status_option_id,
                     assignee         = excluded.assignee,
                     sprint_id        = excluded.sprint_id,
-                    assigned_at      = excluded.assigned_at
+                    assigned_at      = excluded.assigned_at,
+                    repo_name        = excluded.repo_name
                 """,
                 (
                     mac,
@@ -140,6 +149,7 @@ class Store:
                     assignee,
                     sprint_id,
                     datetime.utcnow().isoformat(),
+                    repo_name,
                 ),
             )
 
@@ -220,4 +230,5 @@ def _row_to_assignment(row) -> Assignment:
         assignee=row["assignee"],
         sprint_id=row["sprint_id"],
         assigned_at=row["assigned_at"],
+        repo_name=row["repo_name"] if "repo_name" in row.keys() else "",
     )

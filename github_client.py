@@ -22,6 +22,7 @@ class SprintItem:
     status: str
     status_option_id: str
     sprint_id: str
+    repo_name: str = ""
 
 
 @dataclass
@@ -75,6 +76,7 @@ query($projectId: ID!, $cursor: String) {
               number
               title
               assignees(first: 3) { nodes { login } }
+              repository { name }
             }
           }
           fieldValues(first: 15) {
@@ -224,6 +226,7 @@ class GitHubClient:
                     continue
 
                 assignees = [a["login"] for a in content["assignees"]["nodes"]]
+                repo_name = content.get("repository", {}).get("name", "")
                 items.append(
                     SprintItem(
                         item_id=node["id"],
@@ -233,6 +236,7 @@ class GitHubClient:
                         status=item_status,
                         status_option_id=item_option_id,
                         sprint_id=item_sprint_id,
+                        repo_name=repo_name,
                     )
                 )
 

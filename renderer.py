@@ -152,31 +152,39 @@ def render_card(
     img.putpalette(_PALETTE_RGB)
     draw = ImageDraw.Draw(img)
 
-    size_large = max(12, height // 7)
+    size_header = max(8, height // 10)
     size_medium = max(10, height // 9)
     size_small = max(8, height // 11)
 
-    font_large = _load_font(font_bold_path, size_large)
+    font_header = _load_font(font_bold_path, size_header)
     font_medium = _load_font(font_path, size_medium)
     font_small = _load_font(font_path, size_small)
-
-    # Status symbol: square in bottom-right corner, 1/5 of tag height
-    sym_size = height // 5
-    sym_x = width - sym_size
-    sym_y = height - sym_size
 
     # White background
     draw.rectangle([0, 0, width - 1, height - 1], fill=0)
 
-    # Header: repo name (left) and [#issue] (right), bold on white
+    # Header: black bar with white repo name (left) and [#issue] (right)
     issue_label = f"[#{issue_number}]"
-    bbox = draw.textbbox((0, 0), issue_label, font=font_large)
+    bbox = draw.textbbox((0, 0), issue_label, font=font_header)
     iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
     header_h = ih + 8
 
+    # Status symbol: 1/3 of the white space below the header bar
+    sym_size = (height - header_h) // 3
+    sym_x = width - sym_size
+    sym_y = height - sym_size
+
+    draw.rectangle([0, 0, width - 1, header_h - 1], fill=1)
+    draw.text((width - iw - 4, 4), issue_label, fill=0, font=font_header)
+
     if repo_name:
-        draw.text((4, 4), repo_name, fill=1, font=font_large)
-    draw.text((width - iw - 4, 4), issue_label, fill=1, font=font_large)
+        avail_w = width - iw - 16  # 4px left pad + 8px gap before issue number + 4px right pad
+        text = repo_name
+        if draw.textlength(text, font=font_header) > avail_w:
+            while text and draw.textlength(text + "…", font=font_header) > avail_w:
+                text = text[:-1]
+            text = text + "…"
+        draw.text((4, 4), text, fill=0, font=font_header)
 
     # Body: title text, stopping above the symbol row
     body_top = header_h + 4

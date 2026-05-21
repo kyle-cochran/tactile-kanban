@@ -79,8 +79,9 @@ def do_sync(
                 status_option_id=item.status_option_id,
                 assignee=assignee,
                 sprint_id=item.sprint_id,
+                repo_name=item.repo_name,
             )
-            _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg)
+            _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg, item.repo_name)
             print(f"  [sync] pushed #{item.issue_number} ({item.status}) → {label}")
         else:
             print(f"  [sync] #{item.issue_number} ({item.status}) — no change, skipping")
@@ -101,8 +102,9 @@ def do_sync(
             status_option_id=item.status_option_id,
             assignee=assignee,
             sprint_id=item.sprint_id,
+            repo_name=item.repo_name,
         )
-        _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg)
+        _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg, item.repo_name)
         label = tag.alias or tag.mac[:12]
         print(f"  [sync] auto-assigned #{item.issue_number} → {label}")
 
@@ -164,8 +166,9 @@ def do_assign(store: Store, oepl: OEPLClient, gh: GitHubClient, cfg):
             status_option_id=item.status_option_id,
             assignee=assignee,
             sprint_id=item.sprint_id,
+            repo_name=item.repo_name,
         )
-        _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg)
+        _push_display(oepl, tag, item.issue_number, item.title, item.status, assignee, cfg, item.repo_name)
         print(f"  assigned #{item.issue_number} → tag {tag.alias or tag.mac[:12]}")
 
 
@@ -366,7 +369,7 @@ def _handle_nfc_tap(uid: str, target_status: str, store: Store, oepl: OEPLClient
 
     store.update_assignment_status(tag.mac, option.name, option.id)
     _push_display(oepl, tag, assignment.issue_number, assignment.issue_title,
-                  option.name, assignment.assignee, cfg)
+                  option.name, assignment.assignee, cfg, assignment.repo_name)
     return True
 
 
@@ -403,7 +406,7 @@ def do_status(store: Store):
 # ---------------------------------------------------------------------------
 
 
-def _push_display(oepl: OEPLClient, tag: TagRecord, issue_number: int, title: str, status: str, assignee: str, cfg):
+def _push_display(oepl: OEPLClient, tag: TagRecord, issue_number: int, title: str, status: str, assignee: str, cfg, repo_name: str = ""):
     if tag.width == 0 or tag.height == 0:
         print(f"  [display] tag {tag.mac[:8]}… — unknown dimensions, skipping render")
         return
@@ -414,6 +417,7 @@ def _push_display(oepl: OEPLClient, tag: TagRecord, issue_number: int, title: st
         title=title,
         status=status,
         assignee=assignee,
+        repo_name=repo_name,
         font_path=cfg.font_path,
         font_bold_path=cfg.font_bold_path,
     )
