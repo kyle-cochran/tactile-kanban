@@ -37,11 +37,14 @@ def do_sync(
     items = gh.get_sprint_items(meta.project_id, meta.current_sprint_id)
     print(f"[sync] {len(items)} items in sprint")
 
-    # Refresh tag list from AP
+    # Ensure the meta display is never in the assignment pool (cleans up any prior DB entry)
+    store.remove_tag(cfg.meta_display_mac)
+
+    # Refresh tag list from AP, skipping the meta display
     raw_tags = oepl.get_tags()
     for t in raw_tags:
         mac: str = t.get("mac", "")
-        if not mac:
+        if not mac or mac == cfg.meta_display_mac:
             continue
         hw_type = t.get("hwType", 0)
         w, h = oepl.get_tag_dimensions(hw_type)
@@ -205,10 +208,10 @@ def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
        display, then waits for a tap on the PN532 reader at 0x24.
     3. Saves NFC UID → e-ink MAC to the database.
     """
-    # Refresh tag list from AP so the store is up to date
+    # Refresh tag list from AP so the store is up to date, skipping the meta display
     for t in oepl.get_tags():
         mac = t.get("mac", "")
-        if not mac:
+        if not mac or mac == cfg.meta_display_mac:
             continue
         hw_type = t.get("hwType", 0)
         w, h = oepl.get_tag_dimensions(hw_type)

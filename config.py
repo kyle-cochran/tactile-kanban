@@ -44,6 +44,10 @@ class Config:
             "0x24:Ready,0x25:In Progress,0x26:Blocked,0x27:Done",
         )
     )
+    # MAC of the Lilygo T-Panel used for meta/dashboard display — excluded from ticket assignment
+    meta_display_mac: str = field(
+        default_factory=lambda: os.environ.get("META_DISPLAY_MAC", "00006C0AEEE385A0")
+    )
 
     @property
     def column_map(self) -> dict[int, str]:

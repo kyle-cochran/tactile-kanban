@@ -207,6 +207,12 @@ class Store:
         with self._conn() as conn:
             conn.execute("DELETE FROM assignments WHERE mac=?", (mac,))
 
+    def remove_tag(self, mac: str):
+        """Remove a tag and any assignment for it from the database."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM assignments WHERE mac=?", (mac,))
+            conn.execute("DELETE FROM tags WHERE mac=?", (mac,))
+
 
 def _row_to_tag(row) -> TagRecord:
     return TagRecord(
