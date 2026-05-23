@@ -3,6 +3,9 @@
 Looks for assets/<status-slug>.mp3 and plays it via mpg123 in the
 background. Missing files and a missing mpg123 binary are both silent
 no-ops, so partial sound libraries are fine.
+
+Follow instructions here to set up a raspberry pi with a usb speaker:
+https://learn.adafruit.com/usb-audio-cards-with-a-raspberry-pi/updating-alsa-config
 """
 
 from __future__ import annotations
