@@ -217,8 +217,10 @@ class GitHubClient:
                     if not fv:
                         continue
                     if "optionId" in fv:
-                        item_status = fv.get("name", "")
-                        item_option_id = fv.get("optionId", "")
+                        field_name = fv.get("field", {}).get("name", "")
+                        if field_name.lower() == "status":
+                            item_status = fv.get("name", "")
+                            item_option_id = fv.get("optionId", "")
                     if "iterationId" in fv:
                         item_sprint_id = fv.get("iterationId", "")
 
