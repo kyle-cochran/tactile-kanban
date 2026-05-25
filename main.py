@@ -12,6 +12,7 @@ from config import get_config
 from github_client import GitHubClient, ProjectMeta, SprintItem
 from nfc import NfcReader
 from oepl import OEPLClient
+from sensor_topology import load_topology
 from pn532 import PN532
 from renderer import (render_card, render_registered_confirmation, render_registration_prompt,
                       render_train_car, render_unused, render_waiting_prompt, _car_type_for_mac)
@@ -195,9 +196,7 @@ def do_assign(store: Store, oepl: OEPLClient, gh: GitHubClient, cfg):
 # NFC registration
 # ---------------------------------------------------------------------------
 
-_REGISTRATION_COLUMN       = "READY"
-_REGISTRATION_READER_ADDR  = 0x24     # PN532 I2C address on the Ready column
-_REGISTRATION_I2C_BUS      = 1
+_REGISTRATION_COLUMN = "Ready"
 
 
 def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
@@ -229,9 +228,19 @@ def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
     print(f"[register] Setting all tags to 40 s refresh …")
     oepl.set_fast_refresh_all(interval_s=40)
 
+    # Find the registration reader from the topology
+    topology = load_topology(cfg.sensor_topology_path)
+    reg_sensor = next(
+        (s for s in topology.sensors if s.status.lower() == _REGISTRATION_COLUMN.lower()),
+        None,
+    )
+    if reg_sensor is None:
+        print(f"[register] No '{_REGISTRATION_COLUMN}' sensor found in {cfg.sensor_topology_path}")
+        return
+
+    mux_addr, port = reg_sensor.mux_path[-1]
     print(f"[register] {len(tags_without_nfc)} tag(s) to register.")
-    print(f"[register] Reader: I2C bus {_REGISTRATION_I2C_BUS}, "
-          f"address 0x{_REGISTRATION_READER_ADDR:02X}  →  column '{_REGISTRATION_COLUMN}'\n")
+    print(f"[register] Reader: mux@0x{mux_addr:02X}/port{port}  →  '{reg_sensor.status}'\n")
 
     # Push a neutral waiting screen to every unregistered tag up front so the
     # active 'tap me' prompt is unambiguous when it appears.
@@ -247,11 +256,23 @@ def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
             oepl.push_image(tag.mac, img)
     print("[register] Waiting screens queued. Starting registration loop.\n")
 
+    # Open the mux path to the registration reader and hold it open for the
+    # duration of registration (we only need one reader at a time here).
+    import smbus2 as _smbus2
+    from nfc import _MuxGate
+    mux_bus = _smbus2.SMBus(topology.i2c_bus)
+    gates = {ma: _MuxGate(mux_bus, ma) for ma, _ in reg_sensor.mux_path}
+    for ma, ch in reg_sensor.mux_path:
+        gates[ma].select(ch)
+
     try:
-        reader = PN532(bus=_REGISTRATION_I2C_BUS, address=_REGISTRATION_READER_ADDR)
+        reader = PN532(bus=topology.i2c_bus, address=reg_sensor.address)
         reader.open()
     except Exception as e:
         print(f"[register] Cannot open PN532: {e}")
+        for ma, _ in reg_sensor.mux_path:
+            gates[ma].close_all()
+        mux_bus.close()
         return
 
     try:
@@ -319,6 +340,9 @@ def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
                 print(f"  Skipped.\n")
     finally:
         reader.close()
+        for ma, _ in reg_sensor.mux_path:
+            gates[ma].close_all()
+        mux_bus.close()
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +351,8 @@ def do_register_nfc(store: Store, oepl: OEPLClient, cfg, force: bool = False):
 
 
 def run_service(store: Store, oepl: OEPLClient, gh: GitHubClient, cfg):
-    nfc_reader = NfcReader(cfg.column_map, i2c_bus=cfg.nfc_i2c_bus)
+    topology = load_topology(cfg.sensor_topology_path)
+    nfc_reader = NfcReader(topology)
     nfc_reader.start()
 
     meta = gh.get_project_meta()

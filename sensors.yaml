@@ -1,0 +1,56 @@
+# Physical NFC sensor topology.
+#
+# Three PCA9548A muxes, each with two PN532 sensors on ports 0 and 1.
+#
+# Mux addresses (set via A0/A1/A2 solder jumpers):
+#   0x70 — no jumpers soldered       (A0=0 A1=0 A2=0)
+#   0x71 — jumper 0 (A0) soldered    (A0=1 A1=0 A2=0)
+#   0x72 — jumper 1 (A1) soldered    (A0=0 A1=1 A2=0)
+#
+# The QwiicBus differential link is transparent and does not appear here.
+
+i2c_bus: 1
+
+sensors:
+  - type: mux
+    address: "0x74"
+    channels:
+      - port: 7
+        type: nfc
+        address: "0x24"
+        status: "Blocked"
+
+  - type: mux
+    address: "0x71"
+    channels:
+      - port: 7
+        type: nfc
+        address: "0x24"
+        status: "Ready"
+
+      - port: 0
+        type: nfc
+        address: "0x24"
+        status: "In Progress"
+
+  - type: mux
+    address: "0x70"
+    channels:
+      - port: 7
+        type: nfc
+        address: "0x24"
+        status: "In Review"
+
+      - port: 0
+        type: nfc
+        address: "0x24"
+        status: "Done"
+
+  - type: mux
+    address: "0x72"
+    channels:
+      - port: 0
+        type: nfc
+        address: "0x24"
+        status: Aborted
+
